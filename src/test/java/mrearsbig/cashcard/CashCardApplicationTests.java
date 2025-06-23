@@ -5,8 +5,11 @@ import java.net.URI;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.graphql.GraphQlProperties.Http;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.annotation.DirtiesContext;
@@ -164,29 +167,70 @@ class CashCardApplicationTests {
 	@Test
 	void shouldNotReturnACashCardWhenUsingBadCredentials() {
 		ResponseEntity<String> response = testRestTemplate
-		.withBasicAuth("BAD-USER", "abc123")
-		.getForEntity("/cashcards/99", String.class);
+				.withBasicAuth("BAD-USER", "abc123")
+				.getForEntity("/cashcards/99", String.class);
 		Assertions.assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
 
 		response = testRestTemplate
-		.withBasicAuth("sarah1", "BAD-PASSWORD")
-		.getForEntity("/cashcards/99", String.class);
+				.withBasicAuth("sarah1", "BAD-PASSWORD")
+				.getForEntity("/cashcards/99", String.class);
 		Assertions.assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
 	}
 
 	@Test
 	void shouldRejectUsersWhoAreNotCardOwners() {
 		ResponseEntity<String> response = testRestTemplate
-		.withBasicAuth("hank-owns-no-cards", "qrs456")
-		.getForEntity("/cashcards/99", String.class);
+				.withBasicAuth("hank-owns-no-cards", "qrs456")
+				.getForEntity("/cashcards/99", String.class);
 		Assertions.assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
 	}
 
 	@Test
 	void shouldNotAllowAccessToCashCardsTheyDoNotOwn() {
 		ResponseEntity<String> response = testRestTemplate
-		.withBasicAuth("sarah1", "abc123")
-		.getForEntity("/cashcards/102", String.class);
+				.withBasicAuth("sarah1", "abc123")
+				.getForEntity("/cashcards/102", String.class);
+		Assertions.assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+	}
+
+	@Test
+	@DirtiesContext
+	void shouldUpdateAnExistingCashCard() {
+		CashCard cashCardUpdate = new CashCard(null, 19.99, null);
+		HttpEntity<CashCard> requestEntity = new HttpEntity<>(cashCardUpdate);
+		ResponseEntity<Void> response = testRestTemplate
+				.withBasicAuth("sarah1", "abc123")
+				.exchange("/cashcards/99", HttpMethod.PUT, requestEntity, Void.class);
+		Assertions.assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+
+		ResponseEntity<String> getResponse = testRestTemplate
+				.withBasicAuth("sarah1", "abc123")
+				.getForEntity("/cashcards/99", String.class);
+		Assertions.assertThat(getResponse.getStatusCode()).isEqualTo(HttpStatus.OK);
+		DocumentContext documentContext = JsonPath.parse(getResponse.getBody());
+		Number id = documentContext.read("$.id", Number.class);
+		Assertions.assertThat(id).isEqualTo(99);
+		Double amount = documentContext.read("$.amount", Double.class);
+		Assertions.assertThat(amount).isEqualTo(19.99);
+	}
+
+	@Test
+	void shouldNotUpdateACashCardThatDoesNotExist() {
+		CashCard unknownCard = new CashCard(null, 19.99, null);
+		HttpEntity<CashCard> requestEntity = new HttpEntity<>(unknownCard);
+		ResponseEntity<Void> response = testRestTemplate
+				.withBasicAuth("sarah1", "abc123")
+				.exchange("/cashcards/99999", HttpMethod.PUT, requestEntity, Void.class);
+		Assertions.assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+	}
+
+	@Test
+	void shouldNotUpdateACashCardThatIsOwnedBySomeoneElse() {
+		CashCard kumarsCard = new CashCard(null, 333.33, null);
+		HttpEntity<CashCard> requestEntity = new HttpEntity<>(kumarsCard);
+		ResponseEntity<Void> response = testRestTemplate
+				.withBasicAuth("sarah1", "abc123")
+				.exchange("/cashcards/102", HttpMethod.PUT, requestEntity, Void.class);
 		Assertions.assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
 	}
 }
